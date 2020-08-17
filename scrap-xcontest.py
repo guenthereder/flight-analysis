@@ -158,7 +158,7 @@ def main():
 
     # flight scrapping
     years = range(2007, current_year) if args.all_years else [args.year]
-    for year in years:
+    for year in tqdm(years):
         l_base = url_for_year(base, year)
         new_flights = scrap(args, l_base, sub)
         flights += new_flights
