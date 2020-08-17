@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 
 # SETUP
-url_base = 'https://www.xcontest.org/world/en/flights/'
-url_sub = '#flights[sort]=reg@filter[country]=AT@filter[detail_glider_catg]=FAI3@'
+URL = 'https://www.xcontest.org/world/en/flights/'
+SUB = '#flights[sort]=reg@filter[country]=AT@filter[detail_glider_catg]=FAI3@'
 chrome_driver_path = '/localhome/gue/devel/flightAnalysis/chromedriver'
 
 if __name__ == '__main__' and __package__ is None:
@@ -19,16 +19,26 @@ from selenium.webdriver.support import expected_conditions as ec
 from bs4 import BeautifulSoup
 import datetime as dt
 import argparse
-import sqlite3
-from sqlite3 import Error
+
+# handles sqlite interaction
+import my_sqlite as db
 
 
 class Flight:
-    def __init__(self, datetime, pilot, launch, length, points, airtime, glider):
-        self.datetime, self.pilot, self.launch, self.length, self.points, self.airtime, self.glider = datetime, pilot, launch, length, points, airtime, glider
+    def __init__(self, datetime, pilot, launch, length, points, airtime, glider,
+                 pilot_link, launch_link, flight_link):
+        self.datetime, self.pilot, self.launch, self.length, self.points, self.airtime, self.glider, self.pilot_link, self.launch_link, self.flight_link = datetime, pilot, launch, length, points, airtime, glider, pilot_link, launch_link, flight_link
+
+    def __str__(self):
+        return self.datetime.strftime("%d.%m.%Y") + ", " + self.pilot + ", " + self.launch + ", " + str(self.length) \
+               + ", " + str(self.points) + ", " + self.airtime.strftime("%H:%M") + ", " + self.glider
+
+    def db(self):
+        return self.datetime.strftime("%d.%m.%Y"), self.pilot, self.launch, self.length, self.points, \
+               self.airtime.strftime("%H:%M"), self.glider, self.pilot_link, self.launch_link, self.flight_link
 
 
-def scrap(args,url_base,url_sub):
+def scrap(args, url_base, url_sub):
     """ SCRAP XContest for flights """
     flights = []
 
@@ -52,29 +62,41 @@ def scrap(args,url_base,url_sub):
             flight_list = soup.find('table', {"class": "XClist"}).find('tbody').find_all('tr')
             for flight in flight_list:
                 flight_info = []
+                flight_link = []
                 for atr in flight.find_all('td'):
                     flight_info.append(atr.text)
+                    link = atr.find('a').get('href') if atr.find('a') is not None else None
+                    if link is not None:
+                        flight_link.append(link)
 
-                fdatedate, ftime = flight_info[1].split(' ')[0], flight_info[1].split(' ')[1]
-                fdate = fdatedate + ' ' + ftime.split(':')[0] + ':' + ftime.split(':')[1] + '00'
+                f_datedate, f_time = flight_info[1].split(' ')[0], flight_info[1].split(' ')[1]
+                f_date = f_datedate + ' ' + f_time.split(':')[0] + ':' + f_time.split(':')[1] + '00'
 
                 try:
-                    fdate = dt.datetime.strptime(fdate, '%d.%m.%y %H:%M=UTC%z')
+                    f_date = dt.datetime.strptime(f_date, '%d.%m.%y %H:%M=UTC%z')
                 except ValueError:
                     try:
-                        fdate = dt.datetime.strptime(flight_info[1], '%d.%m.%y %H:%M00')
+                        f_date = dt.datetime.strptime(flight_info[1], '%d.%m.%y %H:%M00')
                     except ValueError:
-                        fdate = dt.datetime.strptime(flight_info[1], '%d.%m.%y %H:%M UTC')
+                        f_date = dt.datetime.strptime(flight_info[1], '%d.%m.%y %H:%M UTC')
 
-                fpilot = flight_info[2][2:]
-                flaunch = flight_info[3][2:]
-                fkm = float(flight_info[5][:-3])
-                fpnts = float(flight_info[6][:-3])
-                fairtime = dt.datetime.strptime(flight_info[7], ' %H : %M h').time()
-                fglider = flight_info[8]
+                f_pilot = flight_info[2][2:]
+                f_launch = flight_info[3][2:]
+                f_km = float(flight_info[5][:-3])
+                f_pnts = float(flight_info[6][:-3])
+                f_airtime = dt.datetime.strptime(flight_info[7], ' %H : %M h').time()
+                f_glider = flight_info[8]
 
-                # print(fdate,fpilot,flaunch,fkm,fpnts,fairtime)
-                flights.append(Flight(fdate, fpilot, flaunch, fkm, fpnts, fairtime, fglider))
+                if len(flight_link) == 3:
+                    f_pilot_link, f_launch_link, f_flight_link = flight_link[0], flight_link[1], flight_link[2]
+                else:
+                    print("Warning: len(flight_link) == ", len(flight_link))
+                    f_pilot_link, f_launch_link, f_flight_link = " ", " ", " "
+
+                # print(f_date,f_pilot,f_launch,f_km,f_pnts,f_airtime)
+                flights.append(Flight(f_date, f_pilot, f_launch, f_km, f_pnts, f_airtime, f_glider, f_pilot_link,
+                                      f_launch_link, f_flight_link)
+                               )
 
             driver.close()
 
@@ -94,34 +116,6 @@ def scrap(args,url_base,url_sub):
     return flights
 
 
-def create_connection(db_file):
-    """ create a database connection to a SQLite database """
-    conn = None
-    try:
-        conn = sqlite3.connect(db_file)
-        print(sqlite3.version)
-    except Error as e:
-        print(e)
-    finally:
-        if conn:
-            conn.close()
-
-    return conn
-
-
-def create_table(conn, create_table_sql):
-    """ create a table from the create_table_sql statement
-    :param conn: Connection object
-    :param create_table_sql: a CREATE TABLE statement
-    :return:
-    """
-    try:
-        c = conn.cursor()
-        c.execute(create_table_sql)
-    except Error as e:
-        print(e)
-
-
 def main():
     parser = argparse.ArgumentParser(description='XContest Flight Scrapper for science and non-commercial interests.')
     parser.add_argument('--num_flights', dest='num_flights', type=int, default=100, help='number of flights to scrap (default: 100)')
@@ -130,26 +124,20 @@ def main():
     parser.add_argument('--create-db', type=bool, dest='db_create', default=False, help='DB file for storing data')
     args = parser.parse_args()
 
-    flights = scrap(args, url_base, url_sub)
+    flights = scrap(args, URL, SUB)
 
-    """ datetime, pilot, launch, length, points, airtime, glider """
-    sql_create_flights_table = """CREATE TABLE IF NOT EXISTS flights (
-                                    id integer PRIMARY KEY,
-                                    name text NOT NULL,
-                                    priority integer,
-                                    status_id integer NOT NULL,
-                                    project_id integer NOT NULL,
-                                    begin_date text NOT NULL,
-                                    end_date text NOT NULL,
-                                    FOREIGN KEY (project_id) REFERENCES projects (id)
-                                );"""
+    [print(x) for x in flights]
 
-    conn = create_connection(args.db_file)
+    conn = db.create_connection(args.db_file)
 
     # create tables
     if conn is not None:
         # create projects table
-        create_table(conn, sql_create_flights_table)
+        db.create_table(conn)
+        # insert data
+        [db.create_flight(conn, flight.db()) for flight in flights]
+
+        conn.close()
 
     else:
         print("Error! cannot create the database connection.")
