@@ -26,20 +26,8 @@ import argparse
 
 # handles sqlite interaction
 import my_sqlite as db
+from my_sqlite import Flight
 import string
-
-class Flight:
-    def __init__(self, datetime, pilot, launch, length, points, airtime, glider,
-                 pilot_link, launch_link, flight_link):
-        self.datetime, self.pilot, self.launch, self.length, self.points, self.airtime, self.glider, self.pilot_link, self.launch_link, self.flight_link = datetime, pilot, launch, length, points, airtime, glider, pilot_link, launch_link, flight_link
-
-    def __str__(self):
-        return self.datetime.strftime("%d.%m.%Y") + ", " + self.pilot + ", " + self.launch + ", " + str(self.length) \
-               + ", " + str(self.points) + ", " + self.airtime.strftime("%H:%M") + ", " + self.glider
-
-    def db(self):
-        return self.datetime.strftime("%d.%m.%Y"), self.pilot, self.launch, self.length, self.points, \
-               self.airtime.strftime("%H:%M"), self.glider, self.pilot_link, self.launch_link, self.flight_link
 
 
 def scrap(args, url_base, url_sub):
