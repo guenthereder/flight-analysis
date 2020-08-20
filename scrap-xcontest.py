@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 
+### next time mechanical soup
+
 # SETUP
 URL = 'https://www.xcontest.org/world/en/flights/'
 SUB = '#flights[sort]=points@filter[detail_glider_catg]=FAI3'
@@ -165,7 +167,7 @@ def main():
         db.create_table(conn)
 
         # insert data
-        [db.create_flight(conn, flight.db()) for flight in tqdm(flights)]
+        [db.create_flight(conn, flight) for flight in tqdm(flights)]
 
         conn.close()
 
