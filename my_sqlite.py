@@ -30,6 +30,14 @@ LAUNCH_SITES_TABLE = """CREATE TABLE IF NOT EXISTS sites (
                                 );"""
 
 
+f4f_points_dict = {
+    'A': 1.3,
+    'B': 1.2,
+    'C': 1.1,
+    'D': 1.0,
+    'CCC': 0.9
+}
+
 class Flight:
     def __init__(self, datetime, pilot, launch, length, points, airtime, glider,
                  pilot_link, launch_link, flight_link):
@@ -46,6 +54,13 @@ class Flight:
         return self.datetime.year, self.datetime.month, self.datetime.day, self.pilot, self.launch, self.length, self.points, \
                self.airtime.hour, self.airtime.minute, self.glider, self.pilot_link, self.launch_link, self.flight_link
 
+    def get_flyforfun_points(self):
+        if self.glider in f4f_points_dict:
+            return self.points * f4f_points_dict[self.glider]
+        else:
+            print("Glider not in dict, CCC rating 0.9")
+            return self.points * 0.9
+
 
 def create_connection(db_file):
     """ create a database connection to a SQLite database """
@@ -56,6 +71,7 @@ def create_connection(db_file):
         print(e)
 
     return conn
+
 
 
 def create_table(conn, create_table_sql=[FLIGHTS_TABLE, LAUNCH_SITES_TABLE]):

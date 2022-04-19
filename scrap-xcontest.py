@@ -13,7 +13,9 @@ LOGIN = "https://www.xcontest.org/"
 # SETUP
 URL = 'https://www.xcontest.org/world/en/'
 SUB = 'flights/#flights[sort]=points@filter[detail_glider_catg]=FAI3'
+DEF_DL_DIR = "igc/"
 chrome_driver_path = './chromedriver'
+
 
 # for years < current_year use 'https://www.xcontest.org/YEAR/world/en/flights/'
 
@@ -28,6 +30,11 @@ from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as ec
+from selenium.common.exceptions import TimeoutException
+
+import glob
+import os
+import time
 
 from tqdm import tqdm
 
@@ -44,7 +51,7 @@ chrome_options = Options()
 chrome_options.headless = True
 service = Service(chrome_driver_path)
 
-prefs = {"download.default_directory" : "igc/"}
+prefs = {"download.default_directory" : DEF_DL_DIR}
 chrome_options.add_experimental_option("prefs",prefs)
 
 driver = webdriver.Chrome(service=service, options=chrome_options)
@@ -58,7 +65,7 @@ def scrap(args, url_base, url_sub):
         #web_driver = webdriver.Chrome(executable_path=chrome_driver_path, options=chrome_options)
         driver.set_page_load_timeout(30)
 
-        if args.gais_daily != '':
+        if args.gais_daily != '' or args.download_url != '': 
             login(args, driver)
 
         wait = WebDriverWait(driver, 30)
@@ -66,6 +73,8 @@ def scrap(args, url_base, url_sub):
 
         if args.gais_daily != '':
             wait.until(ec.element_to_be_clickable((By.CLASS_NAME, 'flights')))
+        elif args.download_url != '':
+            wait.until(ec.element_to_be_clickable((By.CLASS_NAME, 'XClist')))
         else:
             wait.until(ec.element_to_be_clickable((By.CLASS_NAME, 'pg-edge')))
 
@@ -87,8 +96,10 @@ def scrap(args, url_base, url_sub):
                 if link is not None:
                     flight_link.append(link)
 
-            f_datedate, f_time = flight_info[1].split(' ')[0], flight_info[1].split(' ')[1]
-            f_date = f_datedate + ' ' + f_time.split(':')[0] + ':' + f_time.split(':')[1] + '00'
+            f_datedate, f_time = flight_info[1].split(' ')[0].strip(), flight_info[1].split(' ')[1].strip()
+            if f_datedate == " " or f_datedate == "":
+                f_datedate = dt.datetime.now().strftime("%d.%m.%y")
+            f_date = ' '.join([f_datedate,  f_time.split(':')[0] + ':' + f_time.split(':')[1] + '00'])
 
             try:
                 f_date = dt.datetime.strptime(f_date, '%d.%m.%y %H:%M=UTC%z')
@@ -101,7 +112,8 @@ def scrap(args, url_base, url_sub):
                     except ValueError:
                         f_date = dt.datetime.strptime(flight_info[1], '%d.%m.%y %H:%MUTC+02:00')
 
-            f_pilot = flight_info[2][2:]
+            # f_pilot = flight_info[2][2:]
+            f_pilot = flight_info[2]
             f_launch = flight_info[3][2:]
             f_km = float(flight_info[5][:-3])
             f_pnts = float(flight_info[6][:-3])
@@ -193,18 +205,42 @@ def write_db(args, flights):
 
 def download_igc(args, flights):
     wait = WebDriverWait(driver, 30)
-    for flight in flights:
-        flight_url = f"https://www.xcontest.org{flight.flight_link}"
-        driver.get(flight_url)
-        wait.until(ec.element_to_be_clickable((By.CLASS_NAME, 'igc')))
-        igc = driver.find_element(by=By.CLASS_NAME, value="igc")
-        href=igc.find_element(by=By.TAG_NAME, value="a")
+    for idx, flight in enumerate(flights):
+        flight_url = f"https://www.xcontest.org{flight.flight_link}" if "xcontest.org" not in flight.flight_link else flight.flight_link
+        retry = 2
+        while(retry > 0):
+            try:
+                print(flight_url)
+                driver.get(flight_url)
+                wait.until(ec.element_to_be_clickable((By.CLASS_NAME, 'igc')))
+                igc = driver.find_element(by=By.CLASS_NAME, value="igc")
+                href = igc.find_element(by=By.TAG_NAME, value="a")
 
-        if args.verbose:
-            print(f"downloading {href.get_attribute('href')}")
+                if args.verbose:
+                    print(f"downloading {href.get_attribute('href')}")
 
-        href.click()
-        
+                href.click()
+
+                time.sleep(0.5)
+                list_of_files = glob.glob(os.path.join(DEF_DL_DIR,'*')) # * means all if need specific format then *.csv
+                list_of_files = [f for f in list_of_files if '*' not in f]
+                if list_of_files:
+                    dl_file_name = max(list_of_files, key=os.path.getctime)
+                    igc_file_name = flight.pilot + "-" + flight.glider + "-" + dl_file_name.split('/')[-1]
+                    #asciidata = str(igc_file_name.encode('ascii', 'replace'))
+
+                    if args.numbers_to_file:
+                        igc_file_name = f"{idx:02d}-{igc_file_name}"
+
+                    os.rename(dl_file_name, os.path.join(DEF_DL_DIR,igc_file_name))
+                    time.sleep(0.5)
+                retry = 0
+            except TimeoutException as ex:
+                print(f"Error downloading flight at {flight.flight_link}")
+                retry-=1
+                pass
+
+
 
 def main():
     flights = []
@@ -222,6 +258,11 @@ def main():
     parser.add_argument('--status', action="store_true", default=False, help='print debug information')
     parser.add_argument('--verbose', action="store_true", default=False, help='print debug information')
 
+    parser.add_argument('--download-url', default='', help='download from url')
+    parser.add_argument('--numbers-to-file', action="store_true", default=False, help='add number of place in listing to filename prefix')
+    parser.add_argument('--flyforfunpoints', action="store_true", default=False, help='multiply points by fly for fun factors')
+    
+
     '''extending'''
     parser.add_argument('--gais-daily', default='', help='crawl ONLY gaisberg flights for a given date (format yyyy-mm-dd)')
     parser.add_argument('--download', action="store_true", default=False, help='download igc files')
@@ -230,21 +271,28 @@ def main():
 
     # url modification based on parser arguments
     base, sub = url_country_mod(args, URL, SUB)
+    # https://www.xcontest.org/flyforfuncup/fluge/tageswertung-pg/
 
     if args.gais_daily != '':
         sub = GAIS_DAILY_SUB.format(args.gais_daily)
     
     # flight scrapping
-    years = range(2007, current_year) if args.all_years else [args.year]
-    for year in tqdm(years):
-        l_base = url_for_year(base, year)
-        new_flights = scrap(args, l_base, sub)
-        flights += new_flights
-        if args.verbose:
-            [print(flight) for flight in new_flights]
+    if args.download_url == '':
+        flights = scrap_years(args, base, sub)
+    else:
+        flights = scrap(args,args.download_url,"")
 
     if args.verbose:
-        print(len(flights), "flights scrapped")
+        print(len(flights), "flights scrapped, sorted by points")
+        # if args.flyforfunpoints:
+        #     sorted_flights = [(f.get_flyforfun_points(),f) for f in flights]
+        # else:
+        #     sorted_flights = [(f.points,f) for f in flights]
+
+        # sorted(sorted_flights)
+
+        for flight in flights:
+            print(f"{flight.get_flyforfun_points():.2f},{flight}")
 
     if args.write_db:
         write_db(args, flights)
@@ -253,6 +301,19 @@ def main():
         download_igc(args,flights)
 
     driver.close()
+
+
+def scrap_years(args, base, sub)->list:
+    flights = []
+    current_year = dt.datetime.now().year
+    years = range(2007, current_year) if args.all_years else [args.year]
+    for year in tqdm(years):
+        l_base = url_for_year(base, year)
+        new_flights = scrap(args, l_base, sub)
+        flights += new_flights
+        if args.verbose:
+            [print(flight) for flight in new_flights]
+    return flights
 
 
 if __name__ == '__main__':
